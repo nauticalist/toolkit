@@ -303,7 +303,7 @@ func TestTools_ErrorJSON(t *testing.T) {
 	var testTools Tools
 	
 	rr := httptest.NewRecorder()
-	err := testTools.ErroJSON(rr, errors.New("some error"), http.StatusServiceUnavailable)
+	err := testTools.ErrorJSON(rr, errors.New("some error"), http.StatusServiceUnavailable)
 	if err != nil {
 		t.Error(err)
 	}
@@ -323,3 +323,4 @@ func TestTools_ErrorJSON(t *testing.T) {
 		t.Errorf("wrong status code returned; expected 503, but got %d", rr.Code)
 	}
 }
+

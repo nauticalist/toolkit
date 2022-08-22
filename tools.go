@@ -1,17 +1,20 @@
 package toolkit
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"testing"
 )
 
 const randomStringSource = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+"
@@ -25,6 +28,40 @@ type Tools struct {
 	AllowUnknownFields bool
 }
 
+type RoundTripFunc func(req *http.Request) *http.Response
+
+func (f RoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req), nil
+}
+
+func NewTestClient(fn RoundTripFunc) *http.Client {
+	return &http.Client{
+		Transport: fn,
+	}
+}
+
+func TestTools_PushJSONToRemote(t *testing.T) {
+	client := NewTestClient(func(req *http.Request) *http.Response {
+		// test req params
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: ioutil.NopCloser(bytes.NewBufferString("ok")),
+			Header: make(http.Header),
+		}
+	})
+
+	var testTools Tools
+	var foo struct {
+		Bar string `json:"bar"`
+	}
+
+	foo.Bar = "bar"
+	_, _, err := testTools.PushJSONToRemote("http://example.com/some/path", foo, client)
+	if err != nil {
+		t.Error("failed to call remote url:", err)
+	}
+}
+ 
 // RandomString returns a string of random characters of length n, using randomStringSource
 // as the source for the string
 func (t *Tools) RandomString(n int) string {
@@ -276,7 +313,7 @@ func (t *Tools) WriteJSON(w http.ResponseWriter, status int, data interface{}, h
 	return nil
 }
 
-func (t *Tools) ErroJSON(w http.ResponseWriter, err error, status ...int) error {
+func (t *Tools) ErrorJSON(w http.ResponseWriter, err error, status ...int) error {
 	statusCode := http.StatusBadRequest
 	if len(status) > 0 {
 		statusCode = status[0]
@@ -287,4 +324,36 @@ func (t *Tools) ErroJSON(w http.ResponseWriter, err error, status ...int) error 
 	payload.Message = err.Error()
 
 	return t.WriteJSON(w, statusCode, payload)
+}
+
+func (t *Tools) PushJSONToRemote(uri string, data interface{}, client ...*http.Client) (*http.Response, int, error){
+	// create json
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return nil, 0, err
+	}
+	// check for custom http client
+	httpClient := &http.Client{}   
+	if len(client) > 0 {
+		httpClient = client[0]
+	}
+
+	// build the request and set the header
+	request, err := http.NewRequest("POST", uri, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+	
+	// call the remote uri
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	defer response.Body.Close()
+
+	// send the response back
+	return response, response.StatusCode, nil
 }
